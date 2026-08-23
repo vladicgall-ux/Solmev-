@@ -38,7 +38,8 @@ export async function getQuote(params: QuoteParams): Promise<JupiterQuoteRespons
 export interface SwapTxParams {
   quoteResponse: JupiterQuoteResponse;
   userPublicKey: string;
-  priorityFeeMicroLamports: number;
+  /** Hard cap on the priority fee Jupiter is allowed to attach to this tx, in lamports. */
+  priorityFeeMaxLamports: number;
 }
 
 /** Ask Jupiter to build the serialized (base64) versioned swap transaction for a quote. */
@@ -53,7 +54,7 @@ export async function getSwapTransaction(params: SwapTxParams): Promise<string> 
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: {
         priorityLevelWithMaxLamports: {
-          maxLamports: 5_000_000,
+          maxLamports: params.priorityFeeMaxLamports,
           global: false,
           priorityLevel: "high",
         },

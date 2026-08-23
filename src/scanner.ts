@@ -8,6 +8,20 @@ interface DexQuoteResult {
   quote: JupiterQuoteResponse;
 }
 
+const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111";
+const BASE_FEE_LAMPORTS_PER_TX = 5_000n; // buy leg + sell leg + Jito tip tx
+
+/**
+ * Jito tip + priority fees + base fees are paid in SOL regardless of which
+ * token the round trip is denominated in. When the pair's base asset is
+ * wrapped SOL, this is directly comparable to profitLamports and we enforce
+ * it as a floor; for other pairs we can't convert without a price feed, so
+ * we fall back to the bps-only check (see findBestOpportunity).
+ */
+function fixedCostLamports(): bigint {
+  return config.jitoTipLamports + 2n * BigInt(config.priorityFeeMaxLamports) + 3n * BASE_FEE_LAMPORTS_PER_TX;
+}
+
 async function quotesPerDex(
   inputMint: string,
   outputMint: string,
@@ -54,6 +68,10 @@ export async function findBestOpportunity(pair: TokenPair): Promise<Opportunity 
         const finalOut = BigInt(sellQuote.outAmount);
         const profitLamports = finalOut - config.tradeSizeLamports;
         const profitBps = Number((profitLamports * 10_000n) / config.tradeSizeLamports);
+
+        const clearsFixedCosts =
+          pair.mintA !== WRAPPED_SOL_MINT || profitLamports > fixedCostLamports();
+        if (!clearsFixedCosts) continue;
 
         if (profitBps >= config.minProfitBps) {
           if (!best || profitLamports > best.profitLamports) {

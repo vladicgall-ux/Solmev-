@@ -33,7 +33,9 @@ export const config = {
   minProfitBps: Number(process.env.MIN_PROFIT_BPS ?? "15"),
   slippageBps: Number(process.env.SLIPPAGE_BPS ?? "25"),
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "1500"),
-  priorityFeeMicroLamports: Number(process.env.PRIORITY_FEE_MICROLAMPORTS ?? "50000"),
+  // Hard cap on the priority fee Jupiter may attach per leg (lamports, not microLamports).
+  // Keep this small relative to your trade size — it's a real, always-paid-if-landed cost.
+  priorityFeeMaxLamports: Number(process.env.PRIORITY_FEE_MAX_LAMPORTS ?? "20000"),
   jitoEnabled: (process.env.JITO_ENABLED ?? "true") === "true",
   jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL ?? "https://mainnet.block-engine.jito.wtf",
   jitoTipLamports: BigInt(process.env.JITO_TIP_LAMPORTS ?? "100000"),

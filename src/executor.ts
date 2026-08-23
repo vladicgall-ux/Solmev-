@@ -64,12 +64,12 @@ export async function executeOpportunity(
     getSwapTransaction({
       quoteResponse: opp.buyQuote,
       userPublicKey: wallet.publicKey.toBase58(),
-      priorityFeeMicroLamports: config.priorityFeeMicroLamports,
+      priorityFeeMaxLamports: config.priorityFeeMaxLamports,
     }),
     getSwapTransaction({
       quoteResponse: opp.sellQuote,
       userPublicKey: wallet.publicKey.toBase58(),
-      priorityFeeMicroLamports: config.priorityFeeMicroLamports,
+      priorityFeeMaxLamports: config.priorityFeeMaxLamports,
     }),
   ]);
 
