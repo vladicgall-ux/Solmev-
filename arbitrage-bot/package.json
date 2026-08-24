@@ -1,0 +1,24 @@
+{
+  "name": "cross-exchange-arbitrage-bot",
+  "version": "1.0.0",
+  "description": "Scans spot prices across multiple exchanges for the same coin and reports price-difference (arbitrage) opportunities via Telegram",
+  "type": "module",
+  "scripts": {
+    "start": "dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p .",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
