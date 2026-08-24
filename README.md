@@ -31,8 +31,14 @@ Fill in `.env`:
 ### Headless (CLI, wallet from `.env`)
 
 ```bash
-npm start
+npm run build && node dist/index.js
 ```
+
+(`npm start` is intentionally just `dist/index.js` with no `node`/`npx` in
+front of it — that's so hosting panels that build their own start command
+by prepending `node` to whatever `scripts.start` says end up with a valid
+`node dist/index.js`. It means `npm start` won't run directly in a plain
+shell; use the command above for that.)
 
 Starts scanning immediately using `PRIVATE_KEY` from `.env`.
 
@@ -40,7 +46,7 @@ Starts scanning immediately using `PRIVATE_KEY` from `.env`.
 
 Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and
 `TELEGRAM_OWNER_ID` (your numeric id from [@userinfobot](https://t.me/userinfobot))
-in `.env`, then `npm start`. The bot ignores every chat except your own id.
+in `.env`, then `npm run build && node dist/index.js`. The bot ignores every chat except your own id.
 
 In your Telegram chat with the bot:
 

@@ -42,9 +42,18 @@ cp .env.example .env
 
 ## Running
 
-Headless: `npm start` with `PRIVATE_KEY` set in `.env`.
+```bash
+npm run build && node dist/index.js
+```
 
-Telegram-controlled (recommended): set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_OWNER_ID` in `.env`, then `npm start`. Only that one Telegram user id can control the bot — every other chat is silently ignored.
+(`npm start` is intentionally just `dist/index.js` with no `node`/`npx` in
+front — that's so hosting panels that build their own start command by
+prepending `node` to `scripts.start` end up with a valid `node dist/index.js`.
+It won't run directly in a plain shell; use the command above for that.)
+
+Headless: with `PRIVATE_KEY` set in `.env`.
+
+Telegram-controlled (recommended): set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_OWNER_ID` in `.env` first. Only that one Telegram user id can control the bot — every other chat is silently ignored.
 
 In Telegram, everything is buttons on the keyboard at the bottom of the chat:
 

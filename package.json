@@ -4,9 +4,10 @@
   "description": "Cross-DEX arbitrage bot for Solana (Jupiter routing + Jito atomic bundles)",
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
+    "postinstall": "npm run build",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
