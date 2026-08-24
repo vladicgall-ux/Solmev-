@@ -13,6 +13,7 @@ const BTN = {
   positions: "📊 Позиции",
   settings: "⚙️ Настройки",
   wallet: "🔌 Кошелёк",
+  sellAll: "🧹 Продать всё",
 };
 
 type PendingField = "connect" | "tp" | "sl" | "size" | "slots" | "maxmcap";
@@ -27,6 +28,7 @@ function mainKeyboard() {
     [BTN.start, BTN.stop],
     [BTN.balance, BTN.positions],
     [BTN.settings, BTN.wallet],
+    [BTN.sellAll],
   ]).resize();
 }
 
@@ -160,6 +162,20 @@ export function startTelegramBot(engine: SniperEngine): Telegraf {
     await ctx.reply(settingsText(), settingsKeyboard());
   });
 
+  bot.hears(BTN.sellAll, async (ctx) => {
+    if (!getWallet()) {
+      await ctx.reply("Кошелёк не подключен.");
+      return;
+    }
+    await ctx.reply(
+      "⚠️ Продать по рынку ВСЕ токены, которые сейчас лежат в кошельке (включая те, что бот не отслеживает как позиции)? Действие необратимо.",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("✅ Да, продать всё", "sellall:confirm")],
+        [Markup.button.callback("❌ Отмена", "sellall:cancel")],
+      ]),
+    );
+  });
+
   bot.on("callback_query", async (ctx) => {
     const data = "data" in ctx.callbackQuery ? ctx.callbackQuery.data : undefined;
     if (!data) return;
@@ -186,6 +202,29 @@ export function startTelegramBot(engine: SniperEngine): Telegraf {
       pending.set(ctx.chat!.id, field);
       await ctx.answerCbQuery();
       await ctx.reply(FIELD_PROMPTS[field]);
+      return;
+    }
+
+    if (data === "sellall:cancel") {
+      await ctx.answerCbQuery("Отменено");
+      await ctx.deleteMessage().catch(() => {});
+      return;
+    }
+
+    if (data === "sellall:confirm") {
+      const wallet = getWallet();
+      if (!wallet) {
+        await ctx.answerCbQuery("Кошелёк не подключен");
+        return;
+      }
+      await ctx.answerCbQuery("Продаю...");
+      await ctx.editMessageText("⏳ Продаю все токены...").catch(() => {});
+      try {
+        const result = await engine.sellAllHoldings(wallet);
+        await ctx.reply(result);
+      } catch (err) {
+        await ctx.reply(`Ошибка: ${(err as Error).message}`);
+      }
     }
   });
 

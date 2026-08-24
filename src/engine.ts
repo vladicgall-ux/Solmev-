@@ -4,6 +4,7 @@ import {
   PublicKey,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { buildTradeTx, PumpPortalClient } from "./pumpportal.js";
@@ -11,6 +12,18 @@ import { getWallet } from "./wallet.js";
 import type { NewTokenEvent, Position, TradeEvent } from "./types.js";
 
 export type TradeNotifier = (msg: string) => void;
+
+// The classic (non-Token-2022) SPL Token program id — used to enumerate ALL
+// token balances in the wallet for the panic sell-all, not just ones this
+// process happens to be tracking.
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+// Positions are persisted here so an ordinary process restart (crash,
+// panel bounce) doesn't "forget" open positions while the wallet still
+// holds the tokens — that mismatch is what let past buys blow through
+// MAX_CONCURRENT_POSITIONS across restarts. A full redeploy that wipes the
+// filesystem will still lose this; use 🧹 Продать всё to recover from that.
+const POSITIONS_FILE = "positions.json";
 
 export class SniperEngine {
   private connection: Connection;
@@ -22,10 +35,31 @@ export class SniperEngine {
 
   public snipesTaken = 0;
   public cumulativeProfitSol = 0;
+  private insufficientBalanceWarned = false;
 
   constructor() {
     this.connection = new Connection(config.rpcUrl, "confirmed");
     this.pump = new PumpPortalClient();
+    this.loadPersistedPositions();
+  }
+
+  private loadPersistedPositions(): void {
+    if (!existsSync(POSITIONS_FILE)) return;
+    try {
+      const raw = JSON.parse(readFileSync(POSITIONS_FILE, "utf8")) as Position[];
+      for (const p of raw) this.positions.set(p.mint, p);
+      if (raw.length > 0) logger.info(`Restored ${raw.length} position(s) from ${POSITIONS_FILE}`);
+    } catch (err) {
+      logger.error(`failed to read ${POSITIONS_FILE}`, err);
+    }
+  }
+
+  private persistPositions(): void {
+    try {
+      writeFileSync(POSITIONS_FILE, JSON.stringify([...this.positions.values()], null, 2));
+    } catch (err) {
+      logger.error(`failed to write ${POSITIONS_FILE}`, err);
+    }
   }
 
   onTrade(fn: TradeNotifier): void {
@@ -59,6 +93,8 @@ export class SniperEngine {
         if (this.running) void this.handleTrade(event);
       });
       this.pump.connect();
+      // Resume live-trade tracking for any positions restored from disk.
+      for (const p of this.positions.values()) this.pump.watchMint(p.mint);
     }
 
     const mcapFilter = config.mcapFilterEnabled ? `<=${config.maxEntryMarketCapSol} SOL` : "off (buys any fresh launch)";
@@ -94,16 +130,35 @@ export class SniperEngine {
     }
   }
 
+  // A buy has to fund a brand-new associated token account (~0.002 SOL rent)
+  // on top of the swap itself — below this, the transaction can't land at
+  // all even though the naive "% of balance" math comes out positive.
+  private static readonly MIN_VIABLE_TRADE_SOL = 0.004;
+
   private async buy(wallet: Keypair, event: NewTokenEvent): Promise<void> {
     const label = event.symbol ?? event.mint.slice(0, 6);
 
     const balanceLamports = await this.connection.getBalance(wallet.publicKey, "processed");
-    const spendableSol = balanceLamports / 1e9 - config.minSolReserve;
+    const balanceSol = balanceLamports / 1e9;
+    const spendableSol = balanceSol - config.minSolReserve;
     const sizeSol = Number((spendableSol * (config.tradeSizePctOfBalance / 100)).toFixed(6));
-    if (sizeSol <= 0) {
+
+    if (sizeSol < SniperEngine.MIN_VIABLE_TRADE_SOL) {
       logger.warn(`skipping ${label}: balance too low to size a trade (spendable ${spendableSol.toFixed(4)} SOL)`);
+      if (!this.insufficientBalanceWarned) {
+        this.insufficientBalanceWarned = true;
+        const neededSol = config.minSolReserve + SniperEngine.MIN_VIABLE_TRADE_SOL / (config.tradeSizePctOfBalance / 100);
+        this.notify(
+          `⚠️ Баланс ${balanceSol.toFixed(4)} SOL слишком мал для сделки при текущих настройках ` +
+            `(${config.tradeSizePctOfBalance}% от баланса даёт ~${Math.max(sizeSol, 0).toFixed(5)} SOL на сделку, ` +
+            `а покупка нового токена требует минимум ~${SniperEngine.MIN_VIABLE_TRADE_SOL} SOL на аренду аккаунта). ` +
+            `Пополни кошелёк минимум до ~${neededSol.toFixed(3)} SOL, либо подними % размера сделки в ⚙️ Настройки. ` +
+            `Это сообщение больше не повторится, пока баланс не станет достаточным.`,
+        );
+      }
       return;
     }
+    this.insufficientBalanceWarned = false;
 
     logger.trade(`sniping ${label} (${event.mint}) mcap=${event.marketCapSol.toFixed(2)} SOL, size=${sizeSol} SOL`);
 
@@ -153,6 +208,7 @@ export class SniperEngine {
       openedAt: Date.now(),
     };
     this.positions.set(event.mint, position);
+    this.persistPositions();
     this.pump.watchMint(event.mint);
     this.snipesTaken += 1;
     this.notify(`Bought ${label}: ${sizeSol} SOL @ mcap=${event.marketCapSol.toFixed(2)} SOL | tx=${sig}`);
@@ -203,6 +259,7 @@ export class SniperEngine {
     if (config.dryRun) {
       logger.info(`DRY_RUN — would sell ${position.symbol} (${reason}, ${pctChange.toFixed(1)}%)`);
       this.positions.delete(position.mint);
+      this.persistPositions();
       this.pump.unwatchMint(position.mint);
       return;
     }
@@ -216,6 +273,7 @@ export class SniperEngine {
     const pnlSol = proceedsSol; // balanceBefore already excludes the original buy cost, spent earlier
     this.cumulativeProfitSol += pnlSol;
     this.positions.delete(position.mint);
+    this.persistPositions();
     this.pump.unwatchMint(position.mint);
 
     this.notify(
@@ -228,6 +286,76 @@ export class SniperEngine {
     const resp = await this.connection.getParsedTokenAccountsByOwner(owner, { mint: new PublicKey(mint) });
     const account = resp.value[0];
     return account ? Number(account.account.data.parsed.info.tokenAmount.uiAmount ?? 0) : 0;
+  }
+
+  /**
+   * Liquidates every SPL token balance actually sitting in the wallet,
+   * whether or not this process has it tracked as a "position" — recovery
+   * tool for when tracking and real holdings have drifted apart (e.g. after
+   * positions were bought under a since-restarted process). Ignores
+   * dry-run and fast-mode: this is an explicit, one-off user action.
+   */
+  async sellAllHoldings(wallet: Keypair): Promise<string> {
+    const resp = await this.connection.getParsedTokenAccountsByOwner(wallet.publicKey, {
+      programId: TOKEN_PROGRAM_ID,
+    });
+    const held = resp.value
+      .map((a) => ({
+        mint: a.account.data.parsed.info.mint as string,
+        uiAmount: Number(a.account.data.parsed.info.tokenAmount.uiAmount ?? 0),
+      }))
+      .filter((t) => t.uiAmount > 0);
+
+    if (held.length === 0) return "В кошельке нет токенов на продажу.";
+
+    const balanceBefore = await this.connection.getBalance(wallet.publicKey);
+    const results: string[] = [];
+
+    for (const { mint } of held) {
+      try {
+        const priorityFeeSol = await this.resolvePriorityFee(false);
+        const txBytes = await buildTradeTx({
+          publicKey: wallet.publicKey.toBase58(),
+          action: "sell",
+          mint,
+          amount: "100%",
+          denominatedInSol: false,
+          slippagePct: config.slippagePct,
+          priorityFeeSol,
+        });
+        const tx = VersionedTransaction.deserialize(txBytes);
+        tx.sign([wallet]);
+
+        const sim = await this.connection.simulateTransaction(tx, { sigVerify: false });
+        if (sim.value.err) {
+          results.push(`❌ ${mint.slice(0, 6)}.. — не продалось (симуляция: ${JSON.stringify(sim.value.err)})`);
+          continue;
+        }
+
+        const sig = await this.connection.sendRawTransaction(tx.serialize(), { maxRetries: 3 });
+        await this.connection.confirmTransaction(sig, "confirmed");
+        results.push(`✅ ${mint.slice(0, 6)}.. продан`);
+      } catch (err) {
+        results.push(`❌ ${mint.slice(0, 6)}.. — ошибка: ${(err as Error).message}`);
+      }
+
+      const position = this.positions.get(mint);
+      if (position) {
+        this.positions.delete(mint);
+        this.pump.unwatchMint(mint);
+      }
+    }
+    this.persistPositions();
+
+    const balanceAfter = await this.connection.getBalance(wallet.publicKey);
+    const proceedsSol = (balanceAfter - balanceBefore) / 1e9;
+    this.cumulativeProfitSol += proceedsSol;
+
+    return (
+      `Продажа всего (${held.length} токен(ов)):\n` +
+      results.join("\n") +
+      `\n\nИтого получено: ${proceedsSol.toFixed(4)} SOL`
+    );
   }
 
   // Assumed compute budget for a pump.fun bonding-curve swap, used to convert
