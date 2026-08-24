@@ -4,10 +4,8 @@ import { config } from "./config.js";
 
 let current: Keypair | null = config.privateKey ? Keypair.fromSecretKey(bs58.decode(config.privateKey)) : null;
 
-/** Decodes a base58 secret key and makes it the active trading wallet. */
 export function setWalletFromPrivateKey(base58SecretKey: string): Keypair {
-  const secret = bs58.decode(base58SecretKey.trim());
-  const kp = Keypair.fromSecretKey(secret);
+  const kp = Keypair.fromSecretKey(bs58.decode(base58SecretKey.trim()));
   current = kp;
   return kp;
 }

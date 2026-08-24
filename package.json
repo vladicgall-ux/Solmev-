@@ -1,7 +1,7 @@
 {
-  "name": "solana-arb-bot",
+  "name": "pumpfun-sniper-bot",
   "version": "1.0.0",
-  "description": "Cross-DEX arbitrage bot for Solana (Jupiter routing + Jito atomic bundles)",
+  "description": "pump.fun new-token sniper for Solana — buys on launch, auto-exits at take-profit or stop-loss",
   "type": "module",
   "scripts": {
     "start": "dist/index.js",
@@ -14,10 +14,12 @@
     "@solana/web3.js": "^1.95.3",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.5",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "@types/ws": "^8.5.12",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
   },

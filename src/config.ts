@@ -1,52 +1,45 @@
 import "dotenv/config";
-import type { TokenPair } from "./types.js";
-
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
-}
-
-function parsePairs(raw: string): TokenPair[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => {
-      const [mintA, mintB] = s.split(":");
-      if (!mintA || !mintB) {
-        throw new Error(`Malformed TOKEN_PAIRS entry: "${s}" (expected MINT_A:MINT_B)`);
-      }
-      return { mintA, mintB };
-    });
-}
 
 export const config = {
   rpcUrl: process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com",
   privateKey: process.env.PRIVATE_KEY ?? "",
-  pairs: parsePairs(process.env.TOKEN_PAIRS ?? ""),
-  dexes: (process.env.DEXES ?? "Raydium,Orca,Meteora,Whirlpool")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
-  tradeSizeLamports: BigInt(process.env.TRADE_SIZE_LAMPORTS ?? "500000000"),
-  minProfitBps: Number(process.env.MIN_PROFIT_BPS ?? "15"),
-  slippageBps: Number(process.env.SLIPPAGE_BPS ?? "25"),
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? "1500"),
-  // Hard cap on the priority fee Jupiter may attach per leg (lamports, not microLamports).
-  // Keep this small relative to your trade size — it's a real, always-paid-if-landed cost.
-  priorityFeeMaxLamports: Number(process.env.PRIORITY_FEE_MAX_LAMPORTS ?? "20000"),
-  jitoEnabled: (process.env.JITO_ENABLED ?? "true") === "true",
-  jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL ?? "https://mainnet.block-engine.jito.wtf",
-  jitoTipLamports: BigInt(process.env.JITO_TIP_LAMPORTS ?? "100000"),
+  // Trade size is computed fresh before every buy as this % of the
+  // wallet's current SOL balance, not a fixed amount — so it scales down
+  // automatically as the balance shrinks (or grows) instead of over- or
+  // under-committing. Recommended range 5-10.
+  tradeSizePctOfBalance: Number(process.env.TRADE_SIZE_PCT ?? "7"),
+  // Always left unspent as a fee/rent buffer when sizing a trade off balance.
+  minSolReserve: Number(process.env.MIN_SOL_RESERVE ?? "0.01"),
+  // Off by default: buy any fresh launch regardless of market cap. Turn on
+  // (via /settings or MCAP_FILTER_ENABLED=true) to only snipe tokens whose
+  // launch market cap is under maxEntryMarketCapSol.
+  mcapFilterEnabled: (process.env.MCAP_FILTER_ENABLED ?? "false") === "true",
+  maxEntryMarketCapSol: Number(process.env.MAX_ENTRY_MARKET_CAP_SOL ?? "50"),
+  takeProfitPct: Number(process.env.TAKE_PROFIT_PCT ?? "100"),
+  stopLossPct: Number(process.env.STOP_LOSS_PCT ?? "10"),
+  maxConcurrentPositions: Number(process.env.MAX_CONCURRENT_POSITIONS ?? "3"),
+  slippagePct: Number(process.env.SLIPPAGE_PCT ?? "15"),
+
+  // Manual priority fee, used as-is when dynamicPriorityFee is off, and as
+  // the fallback when the RPC can't be queried for recent fees.
+  priorityFeeSol: Number(process.env.PRIORITY_FEE_SOL ?? "0.0005"),
+  // When on, the priority fee is estimated per-trade from recent network
+  // fees instead of a fixed value: aggressive (high percentile) on buys,
+  // since that's the only side actually racing other bots; cheap (median)
+  // on sells, since exiting isn't a race. Bounded by min/max below either way.
+  dynamicPriorityFee: (process.env.DYNAMIC_PRIORITY_FEE ?? "true") === "true",
+  minPriorityFeeSol: Number(process.env.MIN_PRIORITY_FEE_SOL ?? "0.00001"),
+  maxPriorityFeeSol: Number(process.env.MAX_PRIORITY_FEE_SOL ?? "0.002"),
+
+  // Fast mode skips the pre-send simulateTransaction round trip and tells
+  // the RPC to skip its own preflight check on buys, trading a safety net
+  // (catching a doomed tx before paying its base fee) for one fewer network
+  // round trip on the time-critical leg. Sells always simulate — you choose
+  // when to exit, so there's no race to win there, only a chance to lose
+  // fee money after a botched sell.
+  fastMode: (process.env.FAST_MODE ?? "true") === "true",
+
   dryRun: (process.env.DRY_RUN ?? "true") === "true",
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
   telegramOwnerId: process.env.TELEGRAM_OWNER_ID ?? "",
 };
-
-export function assertLiveTradingConfig(): void {
-  required("PRIVATE_KEY");
-  if (config.pairs.length === 0) {
-    throw new Error("TOKEN_PAIRS is empty — nothing to scan");
-  }
-}

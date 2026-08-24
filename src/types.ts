@@ -1,49 +1,22 @@
-export interface TokenPair {
-  mintA: string;
-  mintB: string;
+export interface NewTokenEvent {
+  mint: string;
+  name?: string;
+  symbol?: string;
+  marketCapSol: number;
+  vSolInBondingCurve?: number;
+  vTokensInBondingCurve?: number;
 }
 
-export interface DexQuote {
-  dex: string;
-  inAmount: bigint;
-  outAmount: bigint;
-  raw: JupiterQuoteResponse;
+export interface TradeEvent {
+  mint: string;
+  marketCapSol: number;
 }
 
-export interface JupiterRoutePlanStep {
-  swapInfo: {
-    ammKey: string;
-    label: string;
-    inputMint: string;
-    outputMint: string;
-    inAmount: string;
-    outAmount: string;
-    feeAmount: string;
-    feeMint: string;
-  };
-  percent: number;
-}
-
-export interface JupiterQuoteResponse {
-  inputMint: string;
-  inAmount: string;
-  outputMint: string;
-  outAmount: string;
-  otherAmountThreshold: string;
-  swapMode: string;
-  slippageBps: number;
-  priceImpactPct: string;
-  routePlan: JupiterRoutePlanStep[];
-}
-
-export interface Opportunity {
-  pair: TokenPair;
-  buyDex: string;
-  sellDex: string;
-  buyQuote: JupiterQuoteResponse;
-  sellQuote: JupiterQuoteResponse;
-  inAmount: bigint;
-  outAmount: bigint;
-  profitLamports: bigint;
-  profitBps: number;
+export interface Position {
+  mint: string;
+  symbol: string;
+  entryMarketCapSol: number;
+  tokenAmount: number;
+  costSol: number;
+  openedAt: number;
 }

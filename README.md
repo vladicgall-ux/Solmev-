@@ -1,18 +1,33 @@
-# Solana Arbitrage Bot
+# pump.fun Sniper Bot
 
-Cross-DEX arbitrage bot. It scans the same token pair across multiple DEXs
-(via Jupiter's per-venue quote routing), and when buying on one venue and
-selling on another nets more than `MIN_PROFIT_BPS` after both legs, it
-executes — buy and sell landed atomically in a single Jito bundle so a
-failed second leg can never leave you holding an unwanted position.
+Watches pump.fun for newly created tokens and buys them fresh (no market-cap
+gate by default), then auto-sells each position at `+TAKE_PROFIT_PCT%` or
+`-STOP_LOSS_PCT%`. Single wallet, public bonding-curve trades — no fake
+wallets, no wash trading, no manipulation of other participants' trades.
+It's just a fast, automated bet on very new, very illiquid tokens.
 
-It does **not** do directional/speculative trading and does not touch other
-users' transactions (no front-running, no mempool sniping) — it only ever
-acts on a price gap between two AMMs that already exists independent of
-anyone else's pending trade. Every trade the engine sends has already
-passed the profit-threshold filter in `src/scanner.ts`; it never submits a
-leg it expects to lose money on (fees/slippage can still make a landed
-trade net negative — see Risks below).
+Controlled entirely through a button keyboard in Telegram — connect the
+wallet, tune settings, start/stop, all by tapping, no commands to type
+(except pasting the private key itself, which nothing can turn into a button).
+
+**Read this before funding it:** pump.fun tokens overwhelmingly go to zero —
+most either get abandoned, rug-pulled, or simply never attract enough real
+buyers to reach the take-profit threshold before the creator or early buyers
+dump. A stop-loss limits the damage per snipe, it does not make the strategy
+profitable on average. Treat every dollar you put into this as money you are
+fully prepared to lose. This is speculation, not an income source.
+
+## How it works
+
+1. Connects to [PumpPortal](https://pumpportal.fun)'s public WebSocket feed and subscribes to new-token creation events — this is the trigger, not polling, so there's no artificial delay between a launch and the bot seeing it.
+2. On each new token (market-cap filter off by default — every fresh launch qualifies, unless you turn `🏦 Кап-фильтр` on), if you have a free position slot, it sizes the trade as `TRADE_SIZE_PCT`% of your **current** SOL balance and buys via PumpPortal's non-custodial trade-local API (they build the transaction, you sign and send it — your key never leaves your machine).
+3. Subscribes to live trades on that mint. Since pump.fun's bonding-curve token supply is fixed pre-migration, market cap moves proportionally with price — the bot tracks `current_mcap / entry_mcap` as its P&L proxy.
+4. When that ratio hits `+TAKE_PROFIT_PCT%` or `-STOP_LOSS_PCT%`, it sells the full position and reports realized SOL P&L (measured from your actual wallet balance delta, not the proxy ratio). The freed slot is immediately available to the next qualifying launch.
+
+## Speed and fees
+
+- **Fast mode** (`FAST_MODE`, on by default): skips the local transaction simulation and the RPC's own preflight check on the buy leg only — that's the side actually racing other snipers for the same launch. Sells always simulate first, since there's no race to win on exit, only fee money to lose on a botched one.
+- **Dynamic priority fee** (`DYNAMIC_PRIORITY_FEE`, on by default): instead of a fixed fee, it reads the network's recent per-compute-unit fees and bids the 90th percentile on buys (aggressive — this is the leg that needs to win) and the median on sells (cheap — no race to win there). Always clamped between `MIN_PRIORITY_FEE_SOL` and `MAX_PRIORITY_FEE_SOL` so a fee spike can't blow the budget. This is what gives you both "fast" and "economical" instead of having to pick one static number and live with it.
 
 ## Setup
 
@@ -21,60 +36,34 @@ npm install
 cp .env.example .env
 ```
 
-Fill in `.env`:
-- `RPC_URL` — use a paid RPC (Helius/Triton/QuickNode). Public RPC will rate-limit you into uselessness.
-- `PRIVATE_KEY` — base58 secret key, only needed for headless CLI mode (see below).
-- Leave `DRY_RUN=true` until you've watched it log opportunities for a while and trust the numbers.
+- `RPC_URL` — paid RPC (Helius/QuickNode); public RPC will not keep up at snipe speed.
+- `TRADE_SIZE_PCT` — % of current balance per snipe, recommended 5-10. This is the single most important risk control you have.
+- Leave `DRY_RUN=true` until you've watched a session of (simulated) snipes and are comfortable with the pace and filter behavior.
 
 ## Running
-
-### Headless (CLI, wallet from `.env`)
 
 ```bash
 npm run build && node dist/index.js
 ```
 
 (`npm start` is intentionally just `dist/index.js` with no `node`/`npx` in
-front of it — that's so hosting panels that build their own start command
-by prepending `node` to whatever `scripts.start` says end up with a valid
-`node dist/index.js`. It means `npm start` won't run directly in a plain
-shell; use the command above for that.)
+front — that's so hosting panels that build their own start command by
+prepending `node` to `scripts.start` end up with a valid `node dist/index.js`.
+It won't run directly in a plain shell; use the command above for that.)
 
-Starts scanning immediately using `PRIVATE_KEY` from `.env`.
+Headless: with `PRIVATE_KEY` set in `.env`.
 
-### Telegram-controlled
+Telegram-controlled (recommended): set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_OWNER_ID` in `.env` first. Only that one Telegram user id can control the bot — every other chat is silently ignored.
 
-Set `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and
-`TELEGRAM_OWNER_ID` (your numeric id from [@userinfobot](https://t.me/userinfobot))
-in `.env`, then `npm run build && node dist/index.js`. The bot ignores every chat except your own id.
+In Telegram, everything is buttons on the keyboard at the bottom of the chat:
 
-In your Telegram chat with the bot:
+- **🔌 Кошелёк** — shows balance if connected, or prompts you to paste a base58 private key to connect. The bot tries to auto-delete that message right after (Telegram doesn't always allow bots to delete other users' messages — confirm it's gone).
+- **▶️ Старт / ⏹ Стоп** — start scanning + auto-trading; stop taking new snipes (open positions are left running) and get a results summary (snipes taken, cumulative P&L, positions still open).
+- **💰 Баланс**, **📊 Позиции** — current SOL balance; open positions.
+- **⚙️ Настройки** — opens an inline panel to change take-profit %, stop-loss %, trade size % of balance, concurrent-position slots, the market-cap filter and its threshold, fast mode, dynamic fee, and dry-run — all live, no restart needed.
 
-```
-/connect <base58_private_key>   # loads the wallet, then delete that message
-/balance                        # confirm it landed
-/run                            # start scanning + auto-trading
-/status                         # running state, wallet, cumulative profit
-/dryrun off                     # go live once you trust dry-run output
-/setminprofit 20                # raise/lower the bps threshold live
-/stop
-```
+## Known limitations
 
-You'll get a Telegram message for every trade the engine actually sends,
-with the profit and a running total.
-
-## How the arb is found
-
-For each configured pair (`TOKEN_PAIRS` in `.env`, `MINT_A:MINT_B`):
-1. Fetch a Jupiter quote for `A -> B` restricted to each DEX in `DEXES` individually (`dexes=Raydium`, `dexes=Orca`, …) — this bypasses Jupiter's own cross-DEX routing so you see each venue's raw price.
-2. For every such buy quote, fetch `B -> A` quotes on every other DEX.
-3. Compute the round-trip: `final_A - initial_A`. If the best combination clears `MIN_PROFIT_BPS`, it's a candidate.
-4. Build both swap transactions via Jupiter's `/swap` endpoint, simulate both, and if simulation passes, submit `[buyTx, sellTx, tipTx]` as one Jito bundle — it either all lands or none of it does.
-
-## Risks (read before setting `DRY_RUN=false`)
-
-- **Execution risk**: by the time your bundle lands, the price gap may have closed (someone else took it, or the pool moved). The profit check happens against a quote, not a guarantee — this is normal for all on-chain arb, not a bug.
-- **Bundle non-inclusion**: Jito bundles aren't guaranteed to land; if the bundle is dropped, nothing executes and nothing is lost beyond the tip attempt.
-- **RPC/API rate limits**: the scan does `O(dexes²)` Jupiter quote calls per pair per poll — tune `POLL_INTERVAL_MS` and `DEXES` down if you're getting 429s.
-- **Wallet custody**: `/connect` sends your private key as a Telegram message. Telegram transport is encrypted, but use a **dedicated hot wallet with only the capital you're willing to risk** — never your main wallet — and always delete the message after connecting (the bot tries to auto-delete it, but confirm manually).
-- **Competition**: this is a well-known strategy; expect most easy gaps to already be taken by faster/co-located bots. This is a working starting point, not a guaranteed-profitable black box — tune thresholds and pairs to your own findings.
+- Entry/exit P&L is tracked via market-cap ratio, which ignores bonding-curve slippage on your own buy/sell — realized results can differ modestly from the displayed ratio (the sell-side P&L notification uses your actual wallet balance delta, which is exact; the take-profit/stop-loss *trigger* itself uses the ratio approximation).
+- No rug-pull heuristics (mint/freeze authority checks, holder concentration, socials) — it buys purely on "new" (and, optionally, "under a market-cap ceiling"). Adding real filters here would meaningfully change the risk profile; ask if you want them.
+- `MAX_CONCURRENT_POSITIONS` bounds exposure per moment, but a burst of simultaneous launches can still spend through a chunk of your balance quickly, since size is a % of current balance re-evaluated on every buy — that's by design (it self-scales down as the balance shrinks) but it means multiple fast losses compound faster than a fixed SOL amount would.
