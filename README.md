@@ -51,6 +51,16 @@ front — that's so hosting panels that build their own start command by
 prepending `node` to `scripts.start` end up with a valid `node dist/index.js`.
 It won't run directly in a plain shell; use the command above for that.)
 
+**`dist/` is committed to the repo**, not gitignored. This is deliberate:
+BotHost (and similar panels) install with `npm ci --only=production`, which
+skips `devDependencies` — so `typescript` isn't available to compile
+anything at deploy time, and a `postinstall` build hook just breaks the
+install instead of helping. Shipping the compiled output means the panel
+never needs to build at all, only install runtime deps and run the file.
+**If you change anything under `src/`, run `npm run build` and commit the
+updated `dist/` in the same commit** — otherwise the deployed bot keeps
+running the old code.
+
 Headless: with `PRIVATE_KEY` set in `.env`.
 
 Telegram-controlled (recommended): set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_OWNER_ID` in `.env` first. Only that one Telegram user id can control the bot — every other chat is silently ignored.
